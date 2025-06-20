@@ -1,0 +1,89 @@
+module UART_tx2 (
+  input        clk,       // Divided clock
+  input        rst_n,     // Active-low reset
+  input [7:0]  data,      // Data to transmit
+  output reg   data_out,  // Serial output
+  output reg   status// Debug output (state)
+);
+  // State machine parameters
+  parameter IDLE  = 2'b00, START = 2'b01, DATA = 2'b10, STOP = 2'b11;
+  parameter CLKS_PER_BIT = 16; // Clock cycles per bit (for simulation)
+  parameter CLKSidel = 20;
+  // Internal registers
+  reg [7:0]  data_buff=0;     // Data buffer for transmission
+  reg        curr_stat;     // Tracks start status
+  reg [15:0] clk_counter;   // Counts clock cycles per bit
+  reg [3:0]  flag = 0;      // Bit counter (should use bit_counter)
+  reg [1:0]  STATE = IDLE;  // State machine register
+  reg [31:0] counter = 0;   // Unused
+  reg [3:0]  bit_counter = 0; // Tracks transmitted bits
+  reg        stat = 1;      // Initialization flag (causes Error 10200)
+	
+  // State machine and transmission logic
+  always @(posedge clk or negedge rst_n) begin // Should be @(posedge clk or negedge rst_n)
+    if (!rst_n) begin
+      // Initialize on first cycle (non-synthesizable; use rst_n)
+      data_out <= 1;         // Idle high
+      data_buff <= data;     // Load data
+      clk_counter <= 0; 
+			status<=1;// Reset counter           // Disable initialization
+    end else begin
+      case (STATE)
+        IDLE: begin
+          if (clk_counter < CLKSidel ) begin
+            data_out <= 1;     // Stay idle
+            data_buff <= data; // Reload data
+				clk_counter <= clk_counter +1;
+				status<=1;
+            STATE <= IDLE;
+          end else begin
+            STATE <= START;    // Begin transmission
+            status<=0;
+				clk_counter <= 0;
+          end
+        end
+        START: begin
+          if (clk_counter < CLKS_PER_BIT) begin
+            data_out <= 0;     // Send start bit
+            STATE <= START;
+				data_buff <= data;
+            clk_counter <= clk_counter + 1;
+          end else begin
+            clk_counter <= 0;
+            STATE <= DATA;
+            flag <= 0;         // Reset bit counter
+          end
+        end
+        DATA: begin
+          if (flag < 8) begin
+            STATE <= DATA;
+            if (clk_counter < CLKS_PER_BIT) begin
+              data_out <= data_buff[0]; // Send LSB
+              clk_counter <= clk_counter + 1;
+            end else begin
+              data_buff <= data_buff >> 1; // Shift right
+              clk_counter <= 0;
+              flag <= flag + 1;  // Increment bit counter
+            end
+          end else begin
+            STATE <= STOP;     // Move to stop bit
+            clk_counter <= 0;
+          end
+        end
+        STOP: begin
+          if (clk_counter < CLKS_PER_BIT) begin
+            data_out <= 1;     // Send stop bit
+            STATE <= STOP;
+            clk_counter <= clk_counter + 1;
+          end else begin
+            data_out <= 1;     // Idle
+            STATE <= IDLE;
+				status<=1;
+          end
+        end
+        default: STATE <= IDLE;
+      endcase
+    end
+  end
+
+endmodule
